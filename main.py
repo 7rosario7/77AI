@@ -1,22 +1,20 @@
 import os
 import uuid
 import asyncpg
-
 from fastapi import FastAPI, HTTPException, Depends, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
-
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-
 from chat import reflect  # your OpenAI wrapper
 
 # === CONFIG ===
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
 JWT_SECRET   = os.getenv("JWT_SECRET", "your-very-secret-key")
 ALGORITHM    = "HS256"
+PORT         = int(os.getenv("PORT", 8000))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -25,21 +23,15 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # or your specific frontend origin
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# serve your frontend assets
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# === HEALTH CHECK ===
-@app.get("/healthz")
-async def healthz():
-    return {"status": "ok"}
-
-# === Pydantic Schemas ===
+# === SCHEMAS ===
 class SignupRequest(BaseModel):
     username: str
     password: str
@@ -55,7 +47,7 @@ class ReflectRequest(BaseModel):
     session_id: str
     prompt: str
 
-# === Auth Helpers ===
+# === AUTH HELPERS ===
 def create_access_token(data: dict) -> str:
     return jwt.encode(data, JWT_SECRET, algorithm=ALGORITHM)
 
@@ -69,7 +61,7 @@ async def get_current_user(token: str = Cookie(None)):
         raise HTTPException(401, "Invalid token")
     return {"id": user_id}
 
-# === Startup / Shutdown ===
+# === LIFESPAN EVENTS ===
 @app.on_event("startup")
 async def startup():
     app.state.db = await asyncpg.create_pool(DATABASE_URL)
@@ -78,7 +70,7 @@ async def startup():
 async def shutdown():
     await app.state.db.close()
 
-# === AUTH ROUTES ===
+# === ROUTES ===
 @app.post("/signup", status_code=201)
 async def signup(req: SignupRequest):
     hashed = pwd_context.hash(req.password)
@@ -118,7 +110,6 @@ async def logout():
 async def me(user=Depends(get_current_user)):
     return {"id": user["id"]}
 
-# === SESSION ROUTES ===
 @app.get("/sessions")
 async def list_sessions(user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
@@ -132,8 +123,7 @@ async def create_session(req: NewSessionRequest, user=Depends(get_current_user))
     sid = str(uuid.uuid4())
     title = req.title or "New Chat"
     await app.state.db.execute(
-        "INSERT INTO sessions (session_id,user_id,title,created_at,updated_at) "
-        "VALUES($1,$2,$3,now(),now())",
+        "INSERT INTO sessions (session_id,user_id,title,created_at,updated_at) VALUES($1,$2,$3,now(),now())",
         sid, user["id"], title
     )
     return {"id": sid, "title": title}
@@ -158,7 +148,6 @@ async def clear_session(session_id: str, user=Depends(get_current_user)):
     )
     return {"ok": True}
 
-# === MESSAGE ROUTES ===
 @app.get("/messages")
 async def get_messages(session_id: str, user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
@@ -176,8 +165,18 @@ async def reflect_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
     )
     return {"messages": msgs}
 
-# === UI ROOT ===
 @app.get("/", response_class=HTMLResponse)
 async def root():
     with open("index.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
+
+
+# === UVICORN LAUNCHER ===
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=PORT,
+        log_level="info",
+    )
