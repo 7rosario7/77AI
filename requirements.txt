@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+openai
+python-jose[cryptography]
+passlib[bcrypt]
+pydantic
+python-multipart
+PyJWT
+asyncpg

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>77 AI Chat</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>77 AI Chat</h1>
+    <div class="controls">
+      <div class="dropdown">
+        <button id="sessionBtn">…</button>
+        <ul id="sessionList" class="hidden"></ul>
+      </div>
+      <button id="clearBtn">Clear</button>
+      <button id="logoutBtn">Log Out</button>
+    </div>
+  </header>
+
+  <main id="chatContainer"></main>
+
+  <form id="inputForm">
+    <input type="text" id="userInput" placeholder="Speak your truth…" autocomplete="off" />
+    <button type="submit">Send</button>
+  </form>
+
+  <script src="/static/script.js"></script>
+</body>
+</html>
