@@ -1,26 +1,40 @@
-import os
-import uuid
+import os, uuid
 import asyncpg
 from fastapi import FastAPI, HTTPException, Depends, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
-from pydantic import BaseModel
+from jose import jwt, JWTError
 from passlib.context import CryptContext
-from jose import JWTError, jwt
-from chat import reflect  # your OpenAI wrapper
 
-# === CONFIG ===
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
-JWT_SECRET   = os.getenv("JWT_SECRET", "your-very-secret-key")
-ALGORITHM    = "HS256"
-PORT         = int(os.getenv("PORT", 8000))
+from chat import reflect  # safe now that chat.py reads the API key itself
 
+# ─── CONFIG ─────────────────────────────────────────────────────────────
+DATABASE_URL = os.getenv("DATABASE_URL")
+JWT_SECRET   = os.getenv("JWT_SECRET")
+if not DATABASE_URL or not JWT_SECRET:
+    raise RuntimeError("DATABASE_URL and JWT_SECRET must be set")
+
+ALGORITHM = "HS256"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# === APP SETUP ===
-app = FastAPI()
+# ─── APP + LIFESPAN ────────────────────────────────────────────────────
+app = FastAPI(
+    lifespan=[
+        ("startup",  lambda: None),  # placeholder, overridden below
+        ("shutdown", lambda: None),
+    ]
+)
 
+@app.on_event("startup")
+async def startup():
+    app.state.db = await asyncpg.create_pool(DATABASE_URL)
+
+@app.on_event("shutdown")
+async def shutdown():
+    await app.state.db.close()
+
+# ─── CORS / STATIC ─────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,26 +42,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# === SCHEMAS ===
-class SignupRequest(BaseModel):
-    username: str
-    password: str
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-class NewSessionRequest(BaseModel):
-    title: str
-
-class ReflectRequest(BaseModel):
-    session_id: str
-    prompt: str
-
-# === AUTH HELPERS ===
+# ─── AUTH HELPERS ─────────────────────────────────────────────────────
 def create_access_token(data: dict) -> str:
     return jwt.encode(data, JWT_SECRET, algorithm=ALGORITHM)
 
@@ -61,54 +58,39 @@ async def get_current_user(token: str = Cookie(None)):
         raise HTTPException(401, "Invalid token")
     return {"id": user_id}
 
-# === LIFESPAN EVENTS ===
-@app.on_event("startup")
-async def startup():
-    app.state.db = await asyncpg.create_pool(DATABASE_URL)
+# ─── ROUTES ────────────────────────────────────────────────────────────
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
 
-@app.on_event("shutdown")
-async def shutdown():
-    await app.state.db.close()
-
-# === ROUTES ===
 @app.post("/signup", status_code=201)
-async def signup(req: SignupRequest):
-    hashed = pwd_context.hash(req.password)
+async def signup(username: str, password: str):
+    hashed = pwd_context.hash(password)
     async with app.state.db.acquire() as conn:
         exists = await conn.fetchval(
-            "SELECT 1 FROM users WHERE username=$1", req.username
+            "SELECT 1 FROM users WHERE username=$1", username
         )
         if exists:
             raise HTTPException(400, "Username already taken")
         await conn.execute(
             "INSERT INTO users (username,password_hash) VALUES($1,$2)",
-            req.username, hashed
+            username, hashed
         )
     return {"message": "OK"}
 
 @app.post("/login")
-async def login(req: LoginRequest):
+async def login(username: str, password: str):
     async with app.state.db.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT id,password_hash FROM users WHERE username=$1",
-            req.username
+            username
         )
-    if not row or not pwd_context.verify(req.password, row["password_hash"]):
+    if not row or not pwd_context.verify(password, row["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
     token = create_access_token({"user_id": str(row["id"])})
     resp = JSONResponse({"message": "OK"})
     resp.set_cookie("access_token", token, httponly=True, samesite="lax")
     return resp
-
-@app.post("/logout")
-async def logout():
-    resp = JSONResponse({"message": "OK"})
-    resp.delete_cookie("access_token")
-    return resp
-
-@app.get("/me")
-async def me(user=Depends(get_current_user)):
-    return {"id": user["id"]}
 
 @app.get("/sessions")
 async def list_sessions(user=Depends(get_current_user)):
@@ -116,37 +98,26 @@ async def list_sessions(user=Depends(get_current_user)):
         "SELECT session_id,title FROM sessions WHERE user_id=$1 ORDER BY updated_at DESC",
         user["id"]
     )
-    return [{"id": r["session_id"], "title": r["title"]} for r in rows]
+    return [{"id":r["session_id"],"title":r["title"]} for r in rows]
 
 @app.post("/sessions", status_code=201)
-async def create_session(req: NewSessionRequest, user=Depends(get_current_user)):
+async def create_session(title: str, user=Depends(get_current_user)):
     sid = str(uuid.uuid4())
-    title = req.title or "New Chat"
     await app.state.db.execute(
         "INSERT INTO sessions (session_id,user_id,title,created_at,updated_at) VALUES($1,$2,$3,now(),now())",
-        sid, user["id"], title
+        sid, user["id"], title or "New Chat"
     )
-    return {"id": sid, "title": title}
+    return {"id": sid, "title": title or "New Chat"}
 
-@app.delete("/sessions/{session_id}")
-async def delete_session(session_id: str, user=Depends(get_current_user)):
+@app.post("/reflect")
+async def reflect_endpoint(session_id: str, prompt: str, user=Depends(get_current_user)):
+    msgs = await reflect(app.state.db, prompt, user["id"], session_id)
+    # bump session timestamp
     await app.state.db.execute(
-        "DELETE FROM sessions WHERE session_id=$1 AND user_id=$2",
+        "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
         session_id, user["id"]
     )
-    await app.state.db.execute(
-        "DELETE FROM messages WHERE session_id=$1 AND user_id=$2",
-        session_id, user["id"]
-    )
-    return {"ok": True}
-
-@app.delete("/sessions/{session_id}/messages")
-async def clear_session(session_id: str, user=Depends(get_current_user)):
-    await app.state.db.execute(
-        "DELETE FROM messages WHERE session_id=$1 AND user_id=$2",
-        session_id, user["id"]
-    )
-    return {"ok": True}
+    return {"messages": msgs}
 
 @app.get("/messages")
 async def get_messages(session_id: str, user=Depends(get_current_user)):
@@ -154,29 +125,13 @@ async def get_messages(session_id: str, user=Depends(get_current_user)):
         "SELECT role,content FROM messages WHERE session_id=$1 AND user_id=$2 ORDER BY created_at",
         session_id, user["id"]
     )
-    return [{"role": r["role"], "content": r["content"]} for r in rows]
-
-@app.post("/reflect")
-async def reflect_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
-    msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
-    await app.state.db.execute(
-        "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
-        req.session_id, user["id"]
-    )
-    return {"messages": msgs}
+    return [{"role":r["role"],"content":r["content"]} for r in rows]
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    with open("index.html", encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+    return HTMLResponse(open("index.html","r",encoding="utf-8").read())
 
-
-# === UVICORN LAUNCHER ===
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=PORT,
-        log_level="info",
-    )
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
