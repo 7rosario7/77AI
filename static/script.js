@@ -1,145 +1,127 @@
-const API = window.location.origin;
-let currentSession = null;
+document.addEventListener("DOMContentLoaded", init);
 
-// low-level fetch wrapper
-async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
-  return res;
-}
+let isSignup = false;
 
-// AUTH
-async function onLogin() {
-  const username = ui.username.value.trim();
-  const password = ui.password.value;
-  const res = await api('/login', {
-    method: 'POST',
-    body: JSON.stringify({ username, password }),
-  });
-  if (res.ok) {
-    setupUI();
-  } else {
-    ui.authMsg.textContent = 'Invalid credentials';
+function init() {
+  // UI refs
+  const overlay    = document.getElementById("auth-screen");
+  const form       = document.getElementById("auth-form");
+  const title      = document.getElementById("auth-title");
+  const submitBtn  = document.getElementById("auth-submit");
+  const toggleText = document.getElementById("alt-action");
+  const toggleBtn  = document.getElementById("toggle-btn");
+  const loginBtn   = document.getElementById("login-btn");
+  const signupBtn  = document.getElementById("signup-btn");
+  const logoutBtn  = document.getElementById("logout-btn");
+  const newChatBtn = document.getElementById("new-chat");
+
+  // Chat refs
+  const chatScreen   = document.getElementById("chat-screen");
+  const messagesList = document.getElementById("messages");
+  const msgForm      = document.getElementById("message-form");
+  const msgInput     = document.getElementById("message-input");
+
+  // show login form
+  function showAuth() {
+    overlay.style.display = "flex";
+    title.textContent     = isSignup ? "Sign Up" : "Log In";
+    submitBtn.textContent = isSignup ? "Create Account" : "Log In";
+    toggleText.textContent= isSignup
+      ? "Already have an account?"
+      : "Don't have an account?";
+    toggleBtn.textContent = isSignup ? "Log In" : "Sign Up";
   }
-}
 
-async function onSignup() {
-  const username = ui.username.value.trim();
-  const password = ui.password.value;
-  const res = await api('/signup', {
-    method: 'POST',
-    body: JSON.stringify({ username, password }),
-  });
-  if (res.ok) {
-    setupUI();
-  } else {
-    ui.authMsg.textContent = 'Signup failed (maybe username taken)';
+  // fetch /me
+  async function fetchMe() {
+    const resp = await fetch("/me", { credentials: "include" });
+    if (resp.status === 401) {
+      overlay.style.display = "flex";
+      chatScreen.style.display = "none";
+    } else {
+      overlay.style.display = "none";
+      chatScreen.style.display = "flex";
+      loadHistory();
+    }
   }
-}
 
-async function onLogout() {
-  await api('/logout', { method: 'POST' });
-  window.location.reload();
-}
-
-// SESSIONS
-async function loadSessions() {
-  const res = await api('/sessions');
-  if (!res.ok) return;
-  const sessions = await res.json();
-  ui.sessionList.innerHTML = '';
-  sessions.forEach(s => {
-    const li = document.createElement('li');
-    li.textContent = s.title;
-    li.onclick = () => selectSession(s.id);
-    if (s.id === currentSession) li.classList.add('active');
-    ui.sessionList.append(li);
+  // toggle login/signup mode
+  toggleBtn.addEventListener("click", () => {
+    isSignup = !isSignup;
+    showAuth();
   });
-}
 
-async function createSession() {
-  const title = ui.newSessionTitle.value.trim();
-  if (!title) return;
-  const res = await api('/sessions', {
-    method: 'POST',
-    body: JSON.stringify({ title }),
-  });
-  if (res.ok) {
-    ui.newSessionTitle.value = '';
-    await loadSessions();
-  }
-}
-
-async function selectSession(id) {
-  currentSession = id;
-  ui.messages.innerHTML = '';
-  await loadSessions();
-}
-
-// MESSAGES
-async function sendMessage() {
-  const prompt = ui.prompt.value.trim();
-  if (!prompt || !currentSession) return;
-  ui.messages.innerHTML += `<div class="msg user">${prompt}</div>`;
-  ui.prompt.value = '';
-  const res = await api('/reflect', {
-    method: 'POST',
-    body: JSON.stringify({ session_id: currentSession, prompt }),
-  });
-  if (res.ok) {
-    const { messages } = await res.json();
-    messages.forEach(m => {
-      ui.messages.innerHTML += `<div class="msg ${m.role}">${m.content}</div>`;
+  // form submit (login or signup)
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const u = form.username.value;
+    const p = form.password.value;
+    const url = isSignup ? "/signup" : "/login";
+    const res = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: u, password: p })
     });
-    ui.messages.scrollTop = ui.messages.scrollHeight;
+    if (res.ok) {
+      fetchMe();
+    } else {
+      alert("Authentication failed.");
+    }
+  });
+
+  loginBtn.addEventListener("click", () => { isSignup = false; showAuth(); });
+  signupBtn.addEventListener("click", () => { isSignup = true;  showAuth(); });
+  logoutBtn.addEventListener("click", async () => {
+    await fetch("/logout", { method: "POST", credentials: "include" });
+    window.location.reload();
+  });
+  newChatBtn.addEventListener("click", () => {
+    messagesList.innerHTML = "";
+  });
+
+  // send a new message
+  msgForm.addEventListener("submit", async e => {
+    e.preventDefault();
+    const text = msgInput.value.trim();
+    if (!text) return;
+    appendMessage("user", text);
+    msgInput.value = "";
+    // call your chat endpoint…
+    const resp = await fetch("/chat", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: text })
+    });
+    if (resp.ok) {
+      const { reply } = await resp.json();
+      appendMessage("bot", reply);
+    } else {
+      appendMessage("system", "❗ Error talking to server");
+    }
+  });
+
+  // load previous session history
+  async function loadHistory() {
+    const resp = await fetch("/sessions", { credentials: "include" });
+    if (resp.ok) {
+      const sessions = await resp.json();
+      // pick latest
+      const last = sessions.slice(-1)[0]?.messages || [];
+      messagesList.innerHTML = "";
+      last.forEach(({ role, text }) => appendMessage(role, text));
+    }
   }
-}
 
-// UPDATE UI BASED ON AUTH STATE
-async function setupUI() {
-  const res = await api('/me');
-  if (res.status === 200) {
-    // logged in
-    ui.authSection.style.display = 'none';
-    ui.loginBtn.style.display = 'none';
-    ui.logoutBtn.style.display = '';
-    ui.chatSection.style.display = '';
-    await loadSessions();
-  } else {
-    // not logged in
-    ui.authSection.style.display = '';
-    ui.loginBtn.style.display = '';
-    ui.logoutBtn.style.display = 'none';
-    ui.chatSection.style.display = 'none';
+  function appendMessage(role, text) {
+    const li = document.createElement("li");
+    li.className = role;
+    li.textContent = text;
+    messagesList.appendChild(li);
+    messagesList.scrollTop = messagesList.scrollHeight;
   }
+
+  // kick things off
+  fetchMe();
 }
-
-// WIRE UP ELEMENTS
-const ui = {
-  authSection: document.getElementById('auth-section'),
-  chatSection: document.getElementById('chat-section'),
-  username:    document.getElementById('username'),
-  password:    document.getElementById('password'),
-  authMsg:     document.getElementById('auth-msg'),
-  loginBtn:    document.getElementById('login-btn'),
-  logoutBtn:   document.getElementById('logout-btn'),
-  sessionList: document.getElementById('session-list'),
-  newSessionTitle: document.getElementById('new-session-title'),
-  createSession:   document.getElementById('create-session'),
-  messages:    document.getElementById('messages'),
-  prompt:      document.getElementById('prompt'),
-  sendBtn:     document.getElementById('send-btn'),
-};
-
-ui.loginBtn.onclick    = () => ui.authSection.style.display = '';
-ui.logoutBtn.onclick   = onLogout;
-ui.sendBtn.onclick     = sendMessage;
-ui.createSession.onclick = createSession;
-document.getElementById('do-login').onclick  = onLogin;
-document.getElementById('do-signup').onclick = onSignup;
-
-// INITIALIZE
-window.addEventListener('DOMContentLoaded', setupUI);
