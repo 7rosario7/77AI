@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 
-from chat import reflect
+from chat import reflect  # your OpenAI wrapper
 
 # === CONFIG ===
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -31,7 +31,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # adjust in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -124,7 +124,8 @@ async def list_sessions(user=Depends(get_current_user)):
 async def create_session(title: str, user=Depends(get_current_user)):
     sid = str(uuid.uuid4())
     await app.state.db.execute(
-        "INSERT INTO sessions (session_id,user_id,title,created_at,updated_at) VALUES($1,$2,$3,now(),now())",
+        "INSERT INTO sessions (session_id,user_id,title,created_at,updated_at) "
+        "VALUES($1,$2,$3,now(),now())",
         sid,
         user["id"],
         title or "New Chat",
@@ -158,7 +159,8 @@ async def clear_session(session_id: str, user=Depends(get_current_user)):
 @app.get("/messages")
 async def get_messages(session_id: str, user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
-        "SELECT role,content FROM messages WHERE session_id=$1 AND user_id=$2 ORDER BY created_at",
+        "SELECT role,content FROM messages WHERE session_id=$1 AND user_id=$2 "
+        "ORDER BY created_at",
         session_id,
         user["id"],
     )
@@ -177,6 +179,16 @@ async def reflect_endpoint(session_id: str, prompt: str, user=Depends(get_curren
 # === UI ===
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    html_path = os.path.join(os.getcwd(), "index.html")
-    with open(html_path, encoding="utf-8") as f:
+    with open("index.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
+
+# === RUN SERVER ===
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000)),
+        reload=True,
+    )
