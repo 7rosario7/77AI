@@ -2,29 +2,50 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>77 AI Chat</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header>
     <h1>77 AI Chat</h1>
-    <div class="controls">
-      <div class="dropdown">
-        <button id="sessionBtn">…</button>
-        <ul id="sessionList" class="hidden"></ul>
-      </div>
-      <button id="clearBtn">Clear</button>
-      <button id="logoutBtn">Log Out</button>
+    <div id="top-controls">
+      <button id="login-btn">Log In / Sign Up</button>
+      <button id="logout-btn" style="display:none">Log Out</button>
     </div>
   </header>
 
-  <main id="chatContainer"></main>
+  <main>
+    <!-- LOGIN / SIGNUP FORM -->
+    <section id="auth-section">
+      <h2>Please log in or sign up</h2>
+      <form id="auth-form">
+        <input id="username" placeholder="Username" required />
+        <input id="password" type="password" placeholder="Password" required />
+        <div>
+          <button id="do-login">Log In</button>
+          <button id="do-signup">Sign Up</button>
+        </div>
+      </form>
+      <div id="auth-msg"></div>
+    </section>
 
-  <form id="inputForm">
-    <input type="text" id="userInput" placeholder="Speak your truth…" autocomplete="off" />
-    <button type="submit">Send</button>
-  </form>
+    <!-- CHAT UI -->
+    <section id="chat-section" style="display:none">
+      <aside id="sessions">
+        <h2>Chats</h2>
+        <ul id="session-list"></ul>
+        <input id="new-session-title" placeholder="+ New chat title" />
+        <button id="create-session">+ New Chat</button>
+      </aside>
+      <article id="chat-window">
+        <div id="messages"></div>
+        <div id="input-row">
+          <input id="prompt" placeholder="Speak your truth…" />
+          <button id="send-btn">Send</button>
+        </div>
+      </article>
+    </section>
+  </main>
 
   <script src="/static/script.js"></script>
 </body>
