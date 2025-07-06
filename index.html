@@ -2,50 +2,35 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>77 AI Chat</title>
+  <title>77AI Chat</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+  <!-- HEADER -->
   <header>
-    <h1>77 AI Chat</h1>
-    <div id="top-controls">
-      <button id="login-btn">Log In / Sign Up</button>
-      <button id="logout-btn" style="display:none">Log Out</button>
-    </div>
+    <button id="new-chat-btn">+ New Chat</button>
+    <div id="sessions-dropdown" class="dropdown hidden"></div>
+    <button id="logout-btn">Log Out</button>
   </header>
 
-  <main>
-    <!-- LOGIN / SIGNUP FORM -->
-    <section id="auth-section" style="display:none">
-      <h2>Please log in or sign up</h2>
-      <form id="auth-form">
-        <input id="username" placeholder="Username" required />
-        <input id="password" type="password" placeholder="Password" required />
-        <div>
-          <button id="do-login" type="button">Log In</button>
-          <button id="do-signup" type="button">Sign Up</button>
-        </div>
-      </form>
-      <div id="auth-msg"></div>
-    </section>
+  <!-- LOGIN FORM -->
+  <div id="login-div" class="centered">
+    <form id="login-form">
+      <input id="username" placeholder="Username" required />
+      <input id="password" type="password" placeholder="Password" required />
+      <button type="submit">Log In</button>
+      <button id="signup-btn" type="button">Sign Up</button>
+    </form>
+  </div>
 
-    <!-- CHAT UI -->
-    <section id="chat-section" style="display:none">
-      <aside id="sessions">
-        <h2>Chats</h2>
-        <ul id="session-list"></ul>
-        <input id="new-session-title" placeholder="+ New chat title" />
-        <button id="create-session">+ New Chat</button>
-      </aside>
-      <article id="chat-window">
-        <div id="messages"></div>
-        <div id="input-row">
-          <input id="prompt" placeholder="Speak your truth…" />
-          <button id="send-btn">Send</button>
-        </div>
-      </article>
-    </section>
-  </main>
+  <!-- CHAT AREA -->
+  <div id="chat-div" class="hidden">
+    <div id="chat-box"></div>
+    <div id="input-area">
+      <input id="prompt-input" placeholder="Type your message…" />
+      <button id="send-btn">Send</button>
+    </div>
+  </div>
 
   <script src="/static/script.js"></script>
 </body>
