@@ -5,30 +5,41 @@ from fastapi import FastAPI, HTTPException, Depends, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.types import ASGIApp, Receive, Scope, Send
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from chat import reflect
+from contextlib import asynccontextmanager
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not set")
+    raise RuntimeError("DATABASE_URL must be set")
+
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY is not set")
+    raise RuntimeError("OPENAI_API_KEY must be set")
 # ──────────────────────────────────────────────────────────────────────────────
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# ─── APP & MIDDLEWARE ─────────────────────────────────────────────────────────
-app = FastAPI(title="77 AI Chat")
+# ─── LIFESPAN HANDLER ─────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
+    app.state.db = await asyncpg.create_pool(DATABASE_URL)
+    yield
+    # shutdown
+    await app.state.db.close()
 
+app = FastAPI(title="77 AI Chat", lifespan=lifespan)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ─── MIDDLEWARE & STATIC ──────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten this if you lock to specific domain
+    allow_origins=["*"],  # you can lock this down later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,17 +48,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 # ──────────────────────────────────────────────────────────────────────────────
 
-# ─── LIFESPAN: STARTUP & SHUTDOWN ─────────────────────────────────────────────
-@app.router.lifespan
-async def lifespan(app: FastAPI):
-    # on startup
-    app.state.db = await asyncpg.create_pool(DATABASE_URL)
-    yield
-    # on shutdown
-    await app.state.db.close()
-# ──────────────────────────────────────────────────────────────────────────────
-
-# ─── Pydantic Models ─────────────────────────────────────────────────────────
+# ─── Pydantic Schemas ─────────────────────────────────────────────────────────
 class SignupRequest(BaseModel):
     username: str
     password: str
@@ -69,23 +70,20 @@ def create_access_token(data: dict) -> str:
     return jwt.encode(data, JWT_SECRET, algorithm="HS256")
 
 async def get_current_user(token: str = Cookie(None)):
-    if token is None:
+    if not token:
         raise HTTPException(401, "Not authenticated")
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        user_id = payload.get("user_id")
     except JWTError:
         raise HTTPException(401, "Invalid token")
-    return {"id": user_id}
+    return {"id": payload.get("user_id")}
 # ──────────────────────────────────────────────────────────────────────────────
 
-# ─── HEALTHCHECK ──────────────────────────────────────────────────────────────
+# ─── HEALTHCHECK & UI ─────────────────────────────────────────────────────────
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
-# ──────────────────────────────────────────────────────────────────────────────
 
-# ─── UI ROUTE ─────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def serve_ui():
     with open("index.html", encoding="utf-8") as f:
@@ -98,7 +96,7 @@ async def signup(req: SignupRequest):
     hashed = pwd_context.hash(req.password)
     async with app.state.db.acquire() as conn:
         if await conn.fetchval("SELECT 1 FROM users WHERE username=$1", req.username):
-            raise HTTPException(400, "Username already taken")
+            raise HTTPException(400, "Username taken")
         await conn.execute(
             "INSERT INTO users(username,password_hash) VALUES($1,$2)",
             req.username, hashed
@@ -181,7 +179,6 @@ async def get_messages(session_id: str, user=Depends(get_current_user)):
 @app.post("/reflect")
 async def reflect_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
     msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
-    # bump session timestamp
     await app.state.db.execute(
         "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
         req.session_id, user["id"]
