@@ -1,8 +1,6 @@
-/* reset a few defaults */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; font-family: sans-serif; color: #fff; background: #000; }
 
-/* top nav */
 header {
   position: fixed;
   top: 0; left: 0; right: 0;
@@ -29,11 +27,9 @@ header button {
 }
 #auth-buttons { display: flex; }
 
-/* overlay for login/signup */
 .overlay {
   position: fixed;
-  top: 50px;  /* below header */
-  left: 0; right: 0; bottom: 0;
+  top: 50px; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.9);
   display: none;
   align-items: center;
@@ -60,7 +56,6 @@ header button {
   width: 100%;
 }
 
-/* chat screen */
 #chat-screen {
   position: fixed;
   top: 50px; bottom: 0; left: 0; right: 0;
@@ -73,15 +68,11 @@ header button {
   list-style: none;
   padding: 16px;
 }
-#messages li {
-  margin-bottom: 12px;
-  line-height: 1.4;
-}
+#messages li { margin-bottom: 12px; line-height: 1.4; }
 #messages li.user   { text-align: right; }
 #messages li.bot    { text-align: left; }
 #messages li.system { text-align: center; font-size: 12px; opacity: .6; }
 
-/* input bar */
 #message-form {
   display: flex;
   border-top: 1px solid #333;
