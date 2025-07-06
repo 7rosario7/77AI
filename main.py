@@ -1,3 +1,4 @@
+# main.py
 import os, uuid
 import asyncpg
 from fastapi import FastAPI, HTTPException, Depends, Cookie
@@ -7,25 +8,21 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 
-from chat import reflect  # safe now that chat.py reads the API key itself
+from chat import reflect  # your OpenAI wrapper
 
-# ─── CONFIG ─────────────────────────────────────────────────────────────
+# ─── CONFIG ─────────────────────────────
 DATABASE_URL = os.getenv("DATABASE_URL")
 JWT_SECRET   = os.getenv("JWT_SECRET")
 if not DATABASE_URL or not JWT_SECRET:
-    raise RuntimeError("DATABASE_URL and JWT_SECRET must be set")
+    raise RuntimeError("You must set both DATABASE_URL and JWT_SECRET")
 
 ALGORITHM = "HS256"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# ─── APP + LIFESPAN ────────────────────────────────────────────────────
-app = FastAPI(
-    lifespan=[
-        ("startup",  lambda: None),  # placeholder, overridden below
-        ("shutdown", lambda: None),
-    ]
-)
+# ─── APP SETUP ───────────────────────────
+app = FastAPI()
 
+# ─── STARTUP / SHUTDOWN ──────────────────
 @app.on_event("startup")
 async def startup():
     app.state.db = await asyncpg.create_pool(DATABASE_URL)
@@ -34,7 +31,7 @@ async def startup():
 async def shutdown():
     await app.state.db.close()
 
-# ─── CORS / STATIC ─────────────────────────────────────────────────────
+# ─── CORS + STATIC ──────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -44,7 +41,7 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ─── AUTH HELPERS ─────────────────────────────────────────────────────
+# ─── AUTH HELPERS ───────────────────────
 def create_access_token(data: dict) -> str:
     return jwt.encode(data, JWT_SECRET, algorithm=ALGORITHM)
 
@@ -58,11 +55,12 @@ async def get_current_user(token: str = Cookie(None)):
         raise HTTPException(401, "Invalid token")
     return {"id": user_id}
 
-# ─── ROUTES ────────────────────────────────────────────────────────────
+# ─── HEALTHCHECK ────────────────────────
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
 
+# ─── AUTH ROUTES ────────────────────────
 @app.post("/signup", status_code=201)
 async def signup(username: str, password: str):
     hashed = pwd_context.hash(password)
@@ -92,6 +90,7 @@ async def login(username: str, password: str):
     resp.set_cookie("access_token", token, httponly=True, samesite="lax")
     return resp
 
+# ─── SESSION ROUTES ─────────────────────
 @app.get("/sessions")
 async def list_sessions(user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
@@ -127,10 +126,12 @@ async def get_messages(session_id: str, user=Depends(get_current_user)):
     )
     return [{"role":r["role"],"content":r["content"]} for r in rows]
 
+# ─── UI ROUTE ────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return HTMLResponse(open("index.html","r",encoding="utf-8").read())
 
+# ─── ENTRYPOINT ─────────────────────────
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
