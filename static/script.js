@@ -31,6 +31,7 @@ async function init() {
   clearBtn.onclick = () => clearCurrentSession();
   logoutBtn.onclick = () => logout();
 
+  // form submits
   loginForm.onsubmit = async e => {
     e.preventDefault();
     await auth('/login', {
@@ -65,7 +66,7 @@ async function init() {
     }
   };
 
-  // initial check
+  // check authentication
   const me = await fetch('/me', { credentials: 'include' });
   if (me.status === 200) {
     afterAuth();
@@ -73,7 +74,7 @@ async function init() {
     showForm('login');
   }
 
-  // --- helper fns ---
+  // helper functions
   function showForm(which) {
     loginBox.classList.toggle('hidden', which !== 'login');
     signupBox.classList.toggle('hidden', which !== 'signup');
@@ -121,7 +122,8 @@ async function init() {
     });
     const sess = await resp.json();
     currentSession = sess.id;
-    document.getElementById('chat-window').innerHTML = '<p class="message assistant">New chat started.</p>';
+    document.getElementById('chat-window').innerHTML =
+      '<p class="message assistant">New chat started.</p>';
   }
 
   async function clearCurrentSession() {

@@ -179,7 +179,6 @@ async def get_messages(session_id: str, user=Depends(get_current_user)):
 
 @app.post("/chat")
 async def chat_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
-    # call into your OpenAI wrapper, store both user & assistant messages
     msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
     await app.state.db.execute(
         "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
