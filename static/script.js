@@ -17,13 +17,7 @@ async function init() {
     window.location.reload();
   };
   document.getElementById("clear-btn").onclick = clearChat;
-  document.getElementById("new-chat-btn").onclick = createSession;
-
-  // Session list
-  document.getElementById("session-list").onchange = e => {
-    currentSession = e.target.value;
-    loadMessages();
-  };
+  document.getElementById("new-chat-btn").onclick = toggleDropdown;
 
   // Send button + allow Enter key
   const sendBtn = document.getElementById("send-btn");
@@ -36,7 +30,7 @@ async function init() {
       }
     });
 
-  // Initial check
+  // Initial auth check
   let me = await fetch("/me", { credentials: "include" });
   if (me.ok) return afterAuth();
   showAuth();
@@ -89,18 +83,66 @@ function showAuth() {
   document.getElementById("auth-container").classList.remove("hidden");
 }
 
+// Dropdown toggle & outside‐click close
+function toggleDropdown() {
+  const dd = document.getElementById("session-dropdown");
+  dd.classList.toggle("hidden");
+  if (!dd.classList.contains("hidden")) {
+    loadSessions();
+    document.addEventListener("click", outsideClick);
+  }
+}
+function outsideClick(e) {
+  const dd = document.getElementById("session-dropdown");
+  if (!dd.contains(e.target) && e.target.id !== "new-chat-btn") {
+    dd.classList.add("hidden");
+    document.removeEventListener("click", outsideClick);
+  }
+}
+
 async function loadSessions() {
   let res = await fetch("/sessions", { credentials: "include" });
   let arr = await res.json();
-  let sel = document.getElementById("session-list");
-  sel.innerHTML = "";
+  let ul = document.getElementById("session-list");
+  ul.innerHTML = "";
   arr.forEach(s => {
-    let opt = document.createElement("option");
-    opt.value = s.id;
-    opt.text = s.title || "New Chat";
-    sel.add(opt);
+    let li = document.createElement("li");
+    // title & rename
+    let title = document.createElement("span");
+    title.textContent = s.title || "New Chat";
+    title.onclick = () => {
+      let newTitle = prompt("Rename chat:", s.title);
+      if (newTitle) {
+        fetch(`/sessions`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: newTitle })
+        }).then(loadSessions);
+      }
+    };
+    li.append(title);
+    // delete
+    let del = document.createElement("span");
+    del.textContent = "❌";
+    del.className = "delete";
+    del.onclick = async e => {
+      e.stopPropagation();
+      await fetch(`/sessions/${s.id}`, {
+        method: "DELETE",
+        credentials: "include"
+      });
+      loadSessions();
+    };
+    li.append(del);
+    li.onclick = () => {
+      currentSession = s.id;
+      document.getElementById("session-dropdown").classList.add("hidden");
+      loadMessages();
+    };
+    ul.append(li);
   });
-  currentSession = sel.value;
+  if (arr.length) currentSession = arr[0].id;
 }
 
 async function createSession() {
@@ -111,8 +153,8 @@ async function createSession() {
     body: JSON.stringify({ title: "New Chat" })
   });
   let obj = await res.json();
-  await loadSessions();
   currentSession = obj.id;
+  loadSessions();
   loadMessages();
 }
 
