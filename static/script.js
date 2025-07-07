@@ -3,40 +3,40 @@ document.addEventListener("DOMContentLoaded", init);
 let currentSession = null;
 
 async function init() {
-  // auth toggles
+  // Toggle between login/signup
   document.getElementById("show-signup").onclick = e => { e.preventDefault(); toggleAuth("signup"); };
   document.getElementById("show-login").onclick  = e => { e.preventDefault(); toggleAuth("login"); };
 
-  // forms
+  // Form handlers
   document.getElementById("login-form").onsubmit = handleLogin;
   document.getElementById("signup-form").onsubmit = handleSignup;
 
-  // nav
+  // Top‐nav buttons
   document.getElementById("logout-btn").onclick = async () => {
     await fetch("/logout", { method: "POST", credentials: "include" });
     window.location.reload();
   };
-  document.getElementById("clear-btn").onclick = () => clearChat();
-  document.getElementById("new-chat-btn").onclick = () => createSession();
+  document.getElementById("clear-btn").onclick = clearChat;
+  document.getElementById("new-chat-btn").onclick = createSession;
 
-  // sessions dropdown
+  // Session list
   document.getElementById("session-list").onchange = e => {
     currentSession = e.target.value;
     loadMessages();
   };
 
-  // send
+  // Send button + allow Enter key
   const sendBtn = document.getElementById("send-btn");
   sendBtn.onclick = sendMessage;
-  const userInput = document.getElementById("user-input");
-  userInput.addEventListener("keydown", e => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendBtn.click();
-    }
-  });
+  document.getElementById("user-input")
+    .addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendBtn.click();
+      }
+    });
 
-  // initial auth check
+  // Initial check
   let me = await fetch("/me", { credentials: "include" });
   if (me.ok) return afterAuth();
   showAuth();
@@ -75,9 +75,11 @@ async function handleSignup(e) {
 }
 
 async function afterAuth() {
-  // hide auth, show chat
+  // hide auth, show chat elements
   document.getElementById("auth-container").classList.add("hidden");
-  ["top-nav", "chat-container", "input-bar"].forEach(id => document.getElementById(id).classList.remove("hidden"));
+  ["top-nav", "chat-container", "input-bar"].forEach(id =>
+    document.getElementById(id).classList.remove("hidden")
+  );
   await loadSessions();
   if (!currentSession) await createSession();
   else await loadMessages();
@@ -127,7 +129,6 @@ async function sendMessage() {
   if (!txt) return;
   appendMessage("You", txt);
   document.getElementById("user-input").value = "";
-
   try {
     let res = await fetch("/reflect", {
       method: "POST",

@@ -6,6 +6,7 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+  <!-- Top nav: hidden until after auth -->
   <header id="top-nav" class="hidden">
     <button id="new-chat-btn">+ New Chat</button>
     <select id="session-list"></select>
@@ -17,7 +18,7 @@
   </header>
 
   <main>
-    <!-- AUTH -->
+    <!-- AUTH forms -->
     <section id="auth-container">
       <form id="login-form">
         <h2>Log In</h2>
@@ -35,7 +36,7 @@
       </form>
     </section>
 
-    <!-- CHAT -->
+    <!-- CHAT window -->
     <section id="chat-container" class="hidden">
       <div id="chat-window">
         <p id="status">New chat started.</p>
@@ -43,7 +44,7 @@
     </section>
   </main>
 
-  <!-- INPUT -->
+  <!-- INPUT bar -->
   <footer id="input-bar" class="hidden">
     <textarea id="user-input" placeholder="Type your message…" rows="1"></textarea>
     <button id="send-btn" class="primary">Send</button>
