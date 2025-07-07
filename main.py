@@ -1,18 +1,21 @@
 import os
 import uuid
+
 import asyncpg
-from fastapi import FastAPI, HTTPException, Depends, Cookie
+from fastapi import FastAPI, HTTPException, Depends, Cookie, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from chat import reflect, SYSTEM_PROMPT  # ← import the system prompt
+
+from chat import reflect  # our updated reflect
+from typing import List, Dict
 
 # === CONFIG ===
-DATABASE_URL = os.getenv("DATABASE_URL")
-JWT_SECRET    = os.getenv("JWT_SECRET")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+JWT_SECRET    = os.getenv("JWT_SECRET", "your-very-secret-key")
 ALGORITHM     = "HS256"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -44,7 +47,7 @@ class ChatRequest(BaseModel):
     session_id: str
     prompt: str
 
-# === HELPERS ===
+# === AUTH HELPERS ===
 def create_access_token(data: dict) -> str:
     return jwt.encode(data, JWT_SECRET, algorithm=ALGORITHM)
 
@@ -61,7 +64,7 @@ async def get_current_user(access_token: str = Cookie(None, alias="access_token"
 @app.on_event("startup")
 async def startup():
     app.state.db = await asyncpg.create_pool(DATABASE_URL)
-    # auto-create tables
+    # auto-create tables (including memories)
     ddl = """
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -83,6 +86,13 @@ async def startup():
       content    TEXT    NOT NULL,
       created_at TIMESTAMP DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS memories (
+      id         SERIAL PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id),
+      content    TEXT    NOT NULL,
+      created_at TIMESTAMP DEFAULT now(),
+      UNIQUE(user_id, content)
+    );
     """
     async with app.state.db.acquire() as conn:
         await conn.execute(ddl)
@@ -91,13 +101,13 @@ async def startup():
 async def shutdown():
     await app.state.db.close()
 
-# === AUTH ===
+# === AUTH ENDPOINTS ===
 @app.post("/signup", status_code=201)
 async def signup(req: SignupRequest):
     hashed = pwd_context.hash(req.password)
     async with app.state.db.acquire() as conn:
         if await conn.fetchval("SELECT 1 FROM users WHERE username=$1", req.username):
-            raise HTTPException(400, "Username already taken")
+            raise HTTPException(400, "Username taken")
         await conn.execute(
             "INSERT INTO users (username,password_hash) VALUES($1,$2)",
             req.username, hashed
@@ -128,14 +138,14 @@ async def logout():
 async def me(user=Depends(get_current_user)):
     return {"id": user["id"]}
 
-# === SESSIONS ===
+# === SESSION MANAGEMENT ===
 @app.get("/sessions")
 async def list_sessions(user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
-        "SELECT session_id,title FROM sessions WHERE user_id=$1 ORDER BY updated_at DESC",
+        "SELECT session_id AS id, title FROM sessions WHERE user_id=$1 ORDER BY updated_at DESC",
         user["id"]
     )
-    return [{"id": r["session_id"], "title": r["title"]} for r in rows]
+    return [{"id": r["id"], "title": r["title"]} for r in rows]
 
 @app.post("/sessions", status_code=201)
 async def create_session(req: NewSessionRequest, user=Depends(get_current_user)):
@@ -151,49 +161,34 @@ async def create_session(req: NewSessionRequest, user=Depends(get_current_user))
 async def delete_session(session_id: str, user=Depends(get_current_user)):
     async with app.state.db.acquire() as conn:
         await conn.execute(
-            "DELETE FROM messages WHERE session_id=$1 AND user_id=$2",
-            session_id, user["id"]
+          "DELETE FROM messages WHERE session_id=$1 AND user_id=$2",
+          session_id, user["id"]
         )
         await conn.execute(
-            "DELETE FROM sessions WHERE session_id=$1 AND user_id=$2",
-            session_id, user["id"]
+          "DELETE FROM sessions WHERE session_id=$1 AND user_id=$2",
+          session_id, user["id"]
         )
     return {"ok": True}
 
-@app.delete("/sessions/{session_id}/messages")
-async def clear_session(session_id: str, user=Depends(get_current_user)):
-    await app.state.db.execute(
-        "DELETE FROM messages WHERE session_id=$1 AND user_id=$2",
-        session_id, user["id"]
-    )
-    return {"ok": True}
-
-# === CHAT ===
-# alias to match frontend’s /chat calls
+# === CHAT ENDPOINT ===
 @app.post("/chat")
-async def chat(req: ChatRequest, user=Depends(get_current_user)):
-    # pass along the system prompt first
-    messages = await reflect(app.state.db, SYSTEM_PROMPT, user["id"], req.session_id, initial=True)
-    # then user’s prompt
-    msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
-    return {"messages": messages + msgs}
-
-# backwards‐compat reflect endpoint
-@app.post("/reflect")
-async def reflect_endpoint(req: ChatRequest, user=Depends(get_current_user)):
-    return await chat(req, user)
-
-@app.get("/messages")
-async def get_messages(session_id: str, user=Depends(get_current_user)):
-    rows = await app.state.db.fetch(
-        "SELECT role,content FROM messages WHERE session_id=$1 AND user_id=$2 ORDER BY created_at",
-        session_id, user["id"]
+async def chat_endpoint(req: ChatRequest, user=Depends(get_current_user)):
+    messages = await reflect(
+        app.state.db,
+        req.prompt,
+        user["id"],
+        req.session_id
     )
-    return [{"role": r["role"], "content": r["content"]} for r in rows]
+    # refresh session timestamp
+    await app.state.db.execute(
+        "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
+        req.session_id, user["id"]
+    )
+    return {"messages": messages}
 
 # === UI ===
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def root(request: Request):
     return HTMLResponse(open("index.html", encoding="utf-8").read())
 
 # === RUNNER ===

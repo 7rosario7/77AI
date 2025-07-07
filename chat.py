@@ -1,56 +1,114 @@
 import os
-import asyncpg
-import openai
+import uuid
+from typing import List, Dict, Any
+
 from openai import AsyncOpenAI
+from asyncpg import Pool
+
 from principles import principles
+from questions import questions
 
-# Use the first entry in your principles list as the full system prompt
-SYSTEM_PROMPT = principles[0]
+# === AI SETUP ===
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise RuntimeError("You must set OPENAI_API_KEY")
 
-# Read your OpenAI key once, at import time:
-_API_KEY = os.getenv("OPENAI_API_KEY")
-if not _API_KEY:
-    raise RuntimeError("Missing OPENAI_API_KEY environment variable")
+openai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-# Create a single shared client:
-openai_client = AsyncOpenAI(api_key=_API_KEY)
-
-async def reflect(db_pool: asyncpg.Pool, prompt: str, user_id: int, session_id: str, initial: bool = False):
+# === MEMORY HELPERS ===
+async def seed_user_memory(db: Pool, user_id: int, new_messages: List[Dict[str, Any]]):
     """
-    - db_pool: asyncpg.Pool
-    - prompt: the user’s input (or ignored if initial=True)
-    - user_id, session_id: for storing/fetching history
-    - initial=True ⇒ inject the SYSTEM_PROMPT at start
+    Extract “important” sentences from the last chunk of conversation and store
+    them as user memories.
     """
-    # 1) load history from the DB
-    rows = await db_pool.fetch(
-        "SELECT role, content FROM messages WHERE session_id=$1 AND user_id=$2 ORDER BY created_at",
-        session_id, user_id
+    # for simplicity, we’ll just take any user messages longer than 100 chars
+    for m in new_messages:
+        if m["role"] == "user" and len(m["content"]) > 100:
+            await db.execute(
+                """
+                INSERT INTO memories (user_id, content)
+                VALUES ($1, $2)
+                ON CONFLICT DO NOTHING
+                """,
+                user_id,
+                m["content"][:500]
+            )
+
+async def fetch_user_memories(db: Pool, user_id: int) -> List[str]:
+    rows = await db.fetch(
+        "SELECT content FROM memories WHERE user_id=$1 ORDER BY created_at DESC LIMIT 5",
+        user_id,
     )
-    messages = [{"role": r["role"], "content": r["content"]} for r in rows]
+    return [r["content"] for r in rows]
 
-    # 2) if new session, kick off with system prompt:
-    if initial:
-        messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
-    else:
-        # record the incoming user message
-        messages.append({"role": "user", "content": prompt})
-        await db_pool.execute(
-            "INSERT INTO messages (session_id, user_id, role, content, created_at) VALUES ($1,$2,$3,$4,now())",
-            session_id, user_id, "user", prompt
+
+# === MAIN REFLECT FUNCTION ===
+async def reflect(
+    db: Pool,
+    prompt: str,
+    user_id: int,
+    session_id: str,
+) -> List[Dict[str, str]]:
+    # 1) get past chat messages
+    msgs = await db.fetch(
+        """
+        SELECT role, content
+          FROM messages
+         WHERE session_id = $1
+           AND user_id    = $2
+         ORDER BY created_at
+        """,
+        session_id,
+        user_id,
+    )
+    history = [{"role": r["role"], "content": r["content"]} for r in msgs]
+
+    # 2) get top user memories
+    memories = await fetch_user_memories(db, user_id)
+    if memories:
+        history.insert(
+            0,
+            {
+                "role": "system",
+                "content": "Here are some things I know about the user:\n\n"
+                + "\n– ".join(memories),
+            },
         )
 
-    # 3) call OpenAI
-    resp = await openai_client.chat.completions.create(
+    # 3) build system prompt
+    system_parts = [
+        "# — System prompt for AI —",
+        "You are a compassionate, patient, and measured mirror of the user.",
+        "Respond in a neutral, reflective tone, combining empathetic insights and gentle guidance.",
+        "Use no more than one or two open-ended questions per reply.",
+        *principles,
+        "You may ask one of these deeper questions if it feels natural:\n\n" + "\n".join(questions),
+    ]
+    system_prompt = "\n\n".join(system_parts)
+
+    # 4) append our new user prompt
+    history.append({"role": "user", "content": prompt})
+
+    # 5) call OpenAI
+    response = await openai.chat.completions.create(
         model="gpt-3.5-turbo",
-        messages=messages
+        messages=[{"role": "system", "content": system_prompt}, *history],
     )
-    assistant_msg = resp.choices[0].message.content
+    ai_msg = response.choices[0].message
 
-    # 4) persist the assistant’s reply
-    await db_pool.execute(
-        "INSERT INTO messages (session_id, user_id, role, content, created_at) VALUES ($1,$2,$3,$4,now())",
-        session_id, user_id, "assistant", assistant_msg
+    # 6) persist both sides
+    await db.execute(
+        """
+        INSERT INTO messages (session_id, user_id, role, content)
+        VALUES ($1, $2, 'user', $3), ($1, $2, 'assistant', $4)
+        """,
+        session_id,
+        user_id,
+        prompt,
+        ai_msg.content,
     )
 
-    return [{"role": "assistant", "content": assistant_msg}]
+    # 7) seed long-term memory
+    await seed_user_memory(db, user_id, [{"role": "user", "content": prompt}])
+
+    return [{"role": "assistant", "content": ai_msg.content}]
