@@ -10,8 +10,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
-from chat import reflect  # our updated reflect
-from typing import List, Dict
+from chat import reflect  # your OpenAI wrapper
 
 # === CONFIG ===
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
@@ -64,7 +63,6 @@ async def get_current_user(access_token: str = Cookie(None, alias="access_token"
 @app.on_event("startup")
 async def startup():
     app.state.db = await asyncpg.create_pool(DATABASE_URL)
-    # auto-create tables (including memories)
     ddl = """
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -85,13 +83,6 @@ async def startup():
       role       TEXT    NOT NULL,
       content    TEXT    NOT NULL,
       created_at TIMESTAMP DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS memories (
-      id         SERIAL PRIMARY KEY,
-      user_id    INTEGER NOT NULL REFERENCES users(id),
-      content    TEXT    NOT NULL,
-      created_at TIMESTAMP DEFAULT now(),
-      UNIQUE(user_id, content)
     );
     """
     async with app.state.db.acquire() as conn:
@@ -170,21 +161,28 @@ async def delete_session(session_id: str, user=Depends(get_current_user)):
         )
     return {"ok": True}
 
-# === CHAT ENDPOINT ===
+# === MESSAGE HISTORIES ===
+@app.get("/messages")
+async def get_messages(session_id: str, user=Depends(get_current_user)):
+    rows = await app.state.db.fetch(
+        "SELECT role,content FROM messages WHERE session_id=$1 AND user_id=$2 ORDER BY created_at",
+        session_id, user["id"]
+    )
+    return [{"role": r["role"], "content": r["content"]} for r in rows]
+
+# === CHAT ENDPOINT (and alias) ===
 @app.post("/chat")
 async def chat_endpoint(req: ChatRequest, user=Depends(get_current_user)):
-    messages = await reflect(
-        app.state.db,
-        req.prompt,
-        user["id"],
-        req.session_id
-    )
-    # refresh session timestamp
+    msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
     await app.state.db.execute(
         "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
         req.session_id, user["id"]
     )
-    return {"messages": messages}
+    return {"messages": msgs}
+
+@app.post("/reflect")
+async def reflect_alias(req: ChatRequest, user=Depends(get_current_user)):
+    return await chat_endpoint(req, user)
 
 # === UI ===
 @app.get("/", response_class=HTMLResponse)
