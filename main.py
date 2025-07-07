@@ -1,22 +1,22 @@
 import os
 import uuid
 import asyncpg
+
 from fastapi import FastAPI, HTTPException, Depends, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
+
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
-from chat import reflect            # your OpenAI runner
-from principles import principles   # list of guiding texts
-from questions import questions     # list of possible prompts
+from chat import reflect  # your OpenAI wrapper
 
 # === CONFIG ===
-DATABASE_URL = os.getenv("DATABASE_URL")
-JWT_SECRET   = os.getenv("JWT_SECRET")
-ALGORITHM    = "HS256"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+JWT_SECRET    = os.getenv("JWT_SECRET", "your-very-secret-key")
+ALGORITHM     = "HS256"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -66,7 +66,6 @@ async def get_current_user(
 @app.on_event("startup")
 async def startup():
     app.state.db = await asyncpg.create_pool(DATABASE_URL)
-    # auto-create tables
     ddl = """
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -75,14 +74,14 @@ async def startup():
     );
     CREATE TABLE IF NOT EXISTS sessions (
       session_id UUID PRIMARY KEY,
-      user_id    INTEGER NOT NULL REFERENCES users(id),
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       title      TEXT,
       created_at TIMESTAMP DEFAULT now(),
       updated_at TIMESTAMP DEFAULT now()
     );
     CREATE TABLE IF NOT EXISTS messages (
       id         SERIAL PRIMARY KEY,
-      session_id UUID    NOT NULL REFERENCES sessions(session_id),
+      session_id UUID    NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
       user_id    INTEGER NOT NULL REFERENCES users(id),
       role       TEXT    NOT NULL,
       content    TEXT    NOT NULL,
@@ -99,13 +98,13 @@ async def shutdown():
 # === AUTH ENDPOINTS ===
 @app.post("/signup", status_code=201)
 async def signup(req: SignupRequest):
-    h = pwd_context.hash(req.password)
+    hashed = pwd_context.hash(req.password)
     async with app.state.db.acquire() as conn:
         if await conn.fetchval("SELECT 1 FROM users WHERE username=$1", req.username):
             raise HTTPException(400, "Username taken")
         await conn.execute(
             "INSERT INTO users (username,password_hash) VALUES($1,$2)",
-            req.username, h
+            req.username, hashed
         )
     return {"message": "OK"}
 
@@ -133,18 +132,18 @@ async def logout():
 async def me(user=Depends(get_current_user)):
     return {"id": user["id"]}
 
-# === SESSIONS ===
+# === CHAT SESSIONS ===
 @app.get("/sessions")
 async def list_sessions(user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
         "SELECT session_id,title FROM sessions WHERE user_id=$1 ORDER BY updated_at DESC",
         user["id"]
     )
-    return [{"id": r["session_id"], "title": r["title"]} for r in rows]
+    return [{"id": str(r["session_id"]), "title": r["title"]} for r in rows]
 
 @app.post("/sessions", status_code=201)
 async def create_session(req: NewSessionRequest, user=Depends(get_current_user)):
-    sid   = str(uuid.uuid4())
+    sid = str(uuid.uuid4())
     title = req.title or "New Chat"
     await app.state.db.execute(
         "INSERT INTO sessions (session_id,user_id,title) VALUES($1,$2,$3)",
@@ -155,19 +154,7 @@ async def create_session(req: NewSessionRequest, user=Depends(get_current_user))
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, user=Depends(get_current_user)):
     await app.state.db.execute(
-      "DELETE FROM messages WHERE session_id=$1 AND user_id=$2",
-      session_id, user["id"]
-    )
-    await app.state.db.execute(
-      "DELETE FROM sessions WHERE session_id=$1 AND user_id=$2",
-      session_id, user["id"]
-    )
-    return {"ok": True}
-
-@app.delete("/sessions/{session_id}/messages")
-async def clear_session(session_id: str, user=Depends(get_current_user)):
-    await app.state.db.execute(
-        "DELETE FROM messages WHERE session_id=$1 AND user_id=$2",
+        "DELETE FROM sessions WHERE session_id=$1 AND user_id=$2",
         session_id, user["id"]
     )
     return {"ok": True}
@@ -181,32 +168,20 @@ async def get_messages(session_id: str, user=Depends(get_current_user)):
     )
     return [{"role": r["role"], "content": r["content"]} for r in rows]
 
-# === CHAT ===
-@app.post("/chat")
-async def chat_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
-    # pass your system prompt + principles + questions
-    msgs = await reflect(
-      db       = app.state.db,
-      prompt   = req.prompt,
-      user_id  = user["id"],
-      session  = req.session_id,
-      system   = os.getenv("SYSTEM_PROMPT"),  # you can also import a constant
-      principles=principles,
-      questions =questions,
-    )
-    # bump session timestamp
+@app.post("/reflect")
+async def reflect_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
+    msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
     await app.state.db.execute(
-      "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
-      req.session_id, user["id"]
+        "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
+        req.session_id, user["id"]
     )
     return {"messages": msgs}
 
-# === WEB UI ===
+# === UI ===
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return HTMLResponse(open("index.html", encoding="utf-8").read())
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0",
-                port=int(os.getenv("PORT", 8000)))
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
