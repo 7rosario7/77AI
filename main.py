@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
-from chat import reflect  # your OpenAI wrapper
+from chat import reflect  # your OpenAI wrapper (gpt-3.5-turbo)
 
 # === CONFIG ===
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
@@ -41,7 +41,7 @@ class LoginRequest(BaseModel):
 class NewSessionRequest(BaseModel):
     title: str | None = None
 
-class ReflectRequest(BaseModel):
+class ChatRequest(BaseModel):
     session_id: str
     prompt: str
 
@@ -118,7 +118,6 @@ async def login(req: LoginRequest):
         raise HTTPException(401, "Invalid credentials")
     token = create_access_token({"user_id": str(row["id"])})
     resp = JSONResponse({"message": "OK"})
-    # set the same cookie name that get_current_user expects
     resp.set_cookie("access_token", token, httponly=True, samesite="lax")
     return resp
 
@@ -132,7 +131,7 @@ async def logout():
 async def me(user=Depends(get_current_user)):
     return {"id": user["id"]}
 
-# === CHAT SESSIONS ===
+# === SESSIONS & MESSAGES ===
 @app.get("/sessions")
 async def list_sessions(user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
@@ -172,7 +171,6 @@ async def clear_session(session_id: str, user=Depends(get_current_user)):
     )
     return {"ok": True}
 
-# === MESSAGES ===
 @app.get("/messages")
 async def get_messages(session_id: str, user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
@@ -181,8 +179,10 @@ async def get_messages(session_id: str, user=Depends(get_current_user)):
     )
     return [{"role": r["role"], "content": r["content"]} for r in rows]
 
-@app.post("/reflect")
-async def reflect_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
+# === CHAT ENDPOINT ===
+@app.post("/chat")
+async def chat_endpoint(req: ChatRequest, user=Depends(get_current_user)):
+    # reflect will append user + assistant messages into DB and return full list
     msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
     await app.state.db.execute(
         "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
