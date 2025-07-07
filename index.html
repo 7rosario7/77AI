@@ -8,6 +8,7 @@
 <body>
   <header id="top-nav" class="hidden">
     <button id="new-chat-btn">+ New Chat</button>
+    <select id="session-list"></select>
     <h1>77 AI Chat</h1>
     <div>
       <button id="clear-btn">Clear</button>
@@ -16,9 +17,8 @@
   </header>
 
   <main>
-    <!-- AUTH CONTAINER -->
+    <!-- AUTH -->
     <section id="auth-container">
-      <!-- LOGIN FORM -->
       <form id="login-form">
         <h2>Log In</h2>
         <input id="login-username" placeholder="Username" required />
@@ -26,8 +26,6 @@
         <button type="submit" class="primary">Log In</button>
         <p>Don't have an account? <a href="#" id="show-signup">Sign Up</a></p>
       </form>
-
-      <!-- SIGNUP FORM -->
       <form id="signup-form" class="hidden">
         <h2>Sign Up</h2>
         <input id="signup-username" placeholder="Username" required />
@@ -37,7 +35,7 @@
       </form>
     </section>
 
-    <!-- CHAT CONTAINER -->
+    <!-- CHAT -->
     <section id="chat-container" class="hidden">
       <div id="chat-window">
         <p id="status">New chat started.</p>
@@ -45,9 +43,9 @@
     </section>
   </main>
 
-  <!-- INPUT BAR -->
+  <!-- INPUT -->
   <footer id="input-bar" class="hidden">
-    <input id="user-input" placeholder="Type your message…" />
+    <textarea id="user-input" placeholder="Type your message…" rows="1"></textarea>
     <button id="send-btn" class="primary">Send</button>
   </footer>
 
