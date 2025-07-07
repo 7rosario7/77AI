@@ -8,6 +8,7 @@
 <body>
   <header>
     <button id="new-chat">+ New Chat</button>
+    <select id="session-select" style="display:none;"></select>
     <h1>77 AI Chat</h1>
     <div id="btn-group">
       <button id="clear-btn">Clear</button>
@@ -17,7 +18,6 @@
 
   <!-- AUTH CONTAINER -->
   <div id="auth-container">
-    <!-- LOGIN / SIGNUP TABS -->
     <div id="tabs">
       <button id="show-login" class="active">Log In</button>
       <button id="show-signup">Sign Up</button>
@@ -27,18 +27,17 @@
       <input type="password" id="login-password" placeholder="Password" />
       <button id="login-btn">Log In</button>
     </section>
-    <section id="signup-form" style="display: none;">
+    <section id="signup-form" style="display:none;">
       <input type="text" id="signup-username" placeholder="Username" />
       <input type="password" id="signup-password" placeholder="Password" />
       <button id="signup-btn">Sign Up</button>
     </section>
   </div>
 
-  <!-- APP CONTAINER (hidden until auth) -->
-  <div id="app-container" style="display: none;">
-    <select id="session-select"></select>
+  <!-- APP CONTAINER -->
+  <div id="app-container" style="display:none;">
     <div id="chat-box"></div>
-    <footer>
+    <footer id="input-area">
       <textarea id="prompt" rows="1" placeholder="Speak your truth into the void..."></textarea>
       <button id="send-btn">Send</button>
     </footer>
