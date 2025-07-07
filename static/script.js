@@ -3,22 +3,22 @@ document.addEventListener("DOMContentLoaded", init);
 let currentSession = null;
 
 async function init() {
-  // show auth only at startup
-  document.getElementById("auth-panel").hidden = false;
-  document.getElementById("chat-panel").hidden = true;
+  // Tab toggles
+  document.getElementById("show-login").onclick = () => toggleTab("login");
+  document.getElementById("show-signup").onclick = () => toggleTab("signup");
 
-  // wire buttons
-  document.getElementById("login-btn").onclick    = doLogin;
-  document.getElementById("signup-btn").onclick   = doSignup;
-  document.getElementById("to-signup").onclick    = e => { e.preventDefault(); toggleAuth("signup"); };
-  document.getElementById("to-login").onclick     = e => { e.preventDefault(); toggleAuth("login"); };
-  document.getElementById("new-chat").onclick     = createNewSession;
-  document.getElementById("logout-btn").onclick   = doLogout;
-  document.getElementById("clear-btn").onclick    = () => clearChat(currentSession);
-  document.getElementById("send-btn").onclick     = sendPrompt;
+  // Auth buttons
+  document.getElementById("login-btn").onclick  = login;
+  document.getElementById("signup-btn").onclick = signup;
 
+  // App buttons
+  document.getElementById("new-chat").onclick  = createNewSession;
+  document.getElementById("logout-btn").onclick= logout;
+  document.getElementById("clear-btn").onclick = () => clearChat(currentSession);
+  document.getElementById("send-btn").onclick  = sendPrompt;
+
+  // Prompt placeholder & enter key
   const input = document.getElementById("prompt");
-  input.placeholder = "Speak your truth into the void...";
   input.addEventListener("focus", () => {
     if (input.placeholder === "Speak your truth into the void...")
       input.placeholder = "";
@@ -30,31 +30,48 @@ async function init() {
     }
   });
 
-  // check if already logged in
   await fetchMe();
 }
 
-function toggleAuth(mode) {
-  document.getElementById("login-box").hidden  = (mode === "signup");
-  document.getElementById("signup-box").hidden = (mode === "login");
+function toggleTab(tab) {
+  document.getElementById("show-login").classList.toggle("active", tab==="login");
+  document.getElementById("show-signup").classList.toggle("active", tab==="signup");
+  document.getElementById("login-form").style.display  = tab==="login"  ? "block" : "none";
+  document.getElementById("signup-form").style.display = tab==="signup" ? "block" : "none";
 }
 
-// --- implement these exactly as before, pointing at your FastAPI endpoints:
+async function fetchMe() {
+  let ok = false;
+  try {
+    const res = await fetch("/me");
+    if (res.ok) ok = true;
+  } catch(_) {}
+  if (ok) {
+    document.getElementById("auth-container").style.display = "none";
+    document.getElementById("app-container" ).style.display = "block";
+    await loadSessions();
+  } else {
+    document.getElementById("auth-container").style.display = "block";
+    document.getElementById("app-container" ).style.display = "none";
+  }
+}
 
-async function doLogin() {
+async function login() {
   const u = document.getElementById("login-username").value;
   const p = document.getElementById("login-password").value;
   const res = await fetch("/login", {
     method: "POST",
-    credentials: "include",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({username:u,password:p})
   });
-  if (res.ok) fetchMe();
-  else alert("Invalid credentials");
+  if (res.ok) {
+    await fetchMe();
+  } else {
+    alert("Login failed");
+  }
 }
 
-async function doSignup() {
+async function signup() {
   const u = document.getElementById("signup-username").value;
   const p = document.getElementById("signup-password").value;
   const res = await fetch("/signup", {
@@ -62,94 +79,101 @@ async function doSignup() {
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({username:u,password:p})
   });
-  if (res.ok) alert("Signed up—please log in."); 
-  else res.text().then(t=>alert(t));
-}
-
-async function doLogout() {
-  await fetch("/logout", {method:"POST",credentials:"include"});
-  document.getElementById("auth-panel").hidden = false;
-  document.getElementById("chat-panel").hidden = true;
-}
-
-async function fetchMe() {
-  const me = await fetch("/me", {credentials:"include"});
-  if (me.status===200) {
-    document.getElementById("auth-panel").hidden = true;
-    document.getElementById("chat-panel").hidden = false;
-    await loadSessions();
-    // show greeting only on first load
-    showSystemMessage("Your mirror awaits—let’s begin.");
+  if (res.ok) {
+    await fetchMe();
+  } else {
+    alert("Sign-up failed");
   }
 }
 
-// Sessions list, create, delete, select—hitting /sessions endpoints:
+async function logout() {
+  await fetch("/logout", {method:"POST"});
+  currentSession = null;
+  document.getElementById("session-select").innerHTML = "";
+  document.getElementById("chat-box").innerHTML = "";
+  await fetchMe();
+}
+
 async function loadSessions() {
-  const list = await (await fetch("/sessions", {credentials:"include"})).json();
-  const ul = document.getElementById("session-list");
-  ul.innerHTML = "";
-  list.forEach(s => {
-    const li = document.createElement("li");
-    li.textContent = s.title||"New Chat";
-    li.onclick = () => selectSession(s.id);
-    const x = document.createElement("button");
-    x.textContent = "×"; x.onclick = e=>{e.stopPropagation(); deleteSession(s.id);};
-    li.appendChild(x);
-    ul.appendChild(li);
-  });
+  const sessions = await fetch("/sessions").then(r=>r.json());
+  const sel = document.getElementById("session-select");
+  sel.innerHTML = sessions.map(s => `
+    <option value="${s.id}">${s.title||"New Chat"}</option>
+  `).join("");
+  sel.onchange = () => loadMessages(sel.value);
+  if (sessions.length) {
+    sel.value = sessions[0].id;
+    await loadMessages(sessions[0].id);
+  } else {
+    await createNewSession();
+  }
 }
 
 async function createNewSession() {
-  const {id} = await (await fetch("/sessions",{ method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({title:"New Chat"}) })).json();
+  const {id} = await fetch("/sessions", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({title:null})
+  }).then(r=>r.json());
   currentSession = id;
-  await loadSessions();
-  clearChat(id);
-  showSystemMessage("Your mirror awaits—let’s begin.");
-}
-
-async function deleteSession(id) {
-  await fetch(`/sessions/${id}`,{method:"DELETE",credentials:"include"});
-  if (id===currentSession) clearChat(null);
   await loadSessions();
 }
 
-async function selectSession(id) {
-  currentSession = id;
-  clearChat(id);
-  const msgs = await (await fetch(`/messages?session_id=${id}`,{credentials:"include"})).json();
+async function loadMessages(sessionId) {
+  currentSession = sessionId;
+  const msgs = await fetch(`/messages?session_id=${sessionId}`).then(r=>r.json());
   const box = document.getElementById("chat-box");
+  box.innerHTML = "";
   msgs.forEach(m => {
-    const d = document.createElement("div");
-    d.className = m.role;
-    d.textContent = m.content;
-    box.appendChild(d);
+    const el = document.createElement("div");
+    el.className = m.role;
+    el.textContent = `${m.role === "user" ? "You" : "AI"}: ${m.content}`;
+    box.appendChild(el);
   });
-  box.scrollTop = box.scrollHeight;
+  showSystemMessage("Your mirror awaits—let's begin.");
 }
 
-function clearChat(id) {
-  currentSession = id;
+async function clearChat(sessionId) {
+  await fetch(`/sessions/${sessionId}/messages`, {method:"DELETE"});
   document.getElementById("chat-box").innerHTML = "";
+  showSystemMessage("Chat cleared — speak again.");
 }
 
 async function sendPrompt() {
-  const text = document.getElementById("prompt").value.trim();
-  if (!text || !currentSession) return;
-  document.getElementById("prompt").value = "";
-  // post to /reflect
-  const {messages} = await (await fetch("/reflect", {
-    method:"POST",
-    credentials:"include",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({session_id: currentSession, prompt: text})
-  })).json();
-
+  const txt = document.getElementById("prompt").value.trim();
+  if (!txt || !currentSession) return;
+  // append user msg
   const box = document.getElementById("chat-box");
+  const uel = document.createElement("div");
+  uel.className = "user";
+  uel.textContent = `You: ${txt}`;
+  box.appendChild(uel);
+  document.getElementById("prompt").value = "";
+  box.scrollTop = box.scrollHeight;
+
+  // send to AI
+  const res = await fetch("/reflect", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ session_id: currentSession, prompt: txt })
+  });
+  if (!res.ok) {
+    showSystemMessage("Error: could not send message.");
+    return;
+  }
+  const { messages } = await res.json();
   messages.forEach(m => {
-    const d = document.createElement("div");
-    d.className = m.role;
-    d.textContent = m.content;
-    box.appendChild(d);
+    const ael = document.createElement("div");
+    ael.className = "ai";
+    ael.textContent = `AI: ${m.content}`;
+    box.appendChild(ael);
   });
   box.scrollTop = box.scrollHeight;
+}
+
+function showSystemMessage(text) {
+  const sys = document.createElement("div");
+  sys.className = "system";
+  sys.textContent = text;
+  document.getElementById("chat-box").appendChild(sys);
 }
