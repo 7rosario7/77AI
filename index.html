@@ -1,47 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>77 AI Chat</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <!-- your <head> stays the same -->
 </head>
 <body>
   <header>
     <button id="new-chat">+ New Chat</button>
     <select id="session-select" style="display:none;"></select>
+    <button id="rename-chat" style="display:none;">✎ Rename</button>
+    <button id="clear-btn">Clear</button>
+    <button id="logout-btn">Log Out</button>
     <h1>77 AI Chat</h1>
-    <div id="btn-group">
-      <button id="clear-btn">Clear</button>
-      <button id="logout-btn">Log Out</button>
-    </div>
   </header>
 
-  <!-- AUTH CONTAINER -->
-  <div id="auth-container">
-    <div id="tabs">
-      <button id="show-login" class="active">Log In</button>
-      <button id="show-signup">Sign Up</button>
-    </div>
-    <section id="login-form">
-      <input type="text" id="login-username" placeholder="Username" />
-      <input type="password" id="login-password" placeholder="Password" />
-      <button id="login-btn">Log In</button>
-    </section>
-    <section id="signup-form" style="display:none;">
-      <input type="text" id="signup-username" placeholder="Username" />
-      <input type="password" id="signup-password" placeholder="Password" />
-      <button id="signup-btn">Sign Up</button>
-    </section>
-  </div>
-
-  <!-- APP CONTAINER -->
-  <div id="app-container" style="display:none;">
+  <main>
     <div id="chat-box"></div>
-    <footer id="input-area">
-      <textarea id="prompt" rows="1" placeholder="Speak your truth into the void..."></textarea>
-      <button id="send-btn">Send</button>
-    </footer>
-  </div>
+  </main>
+
+  <footer>
+    <textarea id="prompt" placeholder="Speak your truth into the void..."></textarea>
+    <button id="send-btn">Send</button>
+  </footer>
 
   <script src="/static/script.js"></script>
 </body>
