@@ -10,19 +10,16 @@
   <header>
     <button id="new-chat">+ New Chat</button>
     <h1>77 AI Chat</h1>
-    <div id="auth-buttons">
-      <button id="login-btn">Log In</button>
-      <button id="signup-btn">Sign Up</button>
-      <button id="logout-btn">Log Out</button>
-    </div>
+    <button id="logout-btn">Log Out</button>
   </header>
 
+  <!-- full‐screen login/signup overlay -->
   <div id="auth-screen" class="overlay">
     <form id="auth-form">
       <h2 id="auth-title">Log In</h2>
       <input type="text" id="username" placeholder="Username" required />
       <input type="password" id="password" placeholder="Password" required />
-      <button type="submit" id="auth-submit">Submit</button>
+      <button type="submit" id="auth-submit">Log In</button>
       <p id="toggle-auth">
         <span id="alt-action">Don't have an account?</span>
         <button type="button" id="toggle-btn">Sign Up</button>
@@ -30,6 +27,7 @@
     </form>
   </div>
 
+  <!-- chat pane (hidden initially) -->
   <div id="chat-screen">
     <ul id="messages"></ul>
     <form id="message-form">
