@@ -8,14 +8,21 @@
 <body>
   <header>
     <button id="new-chat">+ New Chat</button>
+
+    <!-- session picker -->
     <select id="session-select" style="display:none;"></select>
-    <button id="rename-btn" title="Rename current chat" style="display:none;">✎ Rename</button>
+
+    <!-- rename / delete -->
+    <button id="rename-btn" style="display:none;">✎ Rename</button>
+    <button id="delete-btn" style="display:none;">🗑 Delete Chat</button>
+
     <button id="clear-btn" style="display:none;">Clear</button>
     <button id="logout-btn" style="display:none;">Log Out</button>
+
     <h1>77 AI Chat</h1>
   </header>
 
-  <!-- AUTH CONTAINER -->
+  <!-- AUTH -->
   <div id="auth-container">
     <div id="tabs">
       <button id="show-login" class="active">Log In</button>
@@ -33,7 +40,7 @@
     </form>
   </div>
 
-  <!-- APP CONTAINER -->
+  <!-- APP -->
   <div id="app-container" style="display:none;">
     <div id="chat-box"></div>
     <div id="input-row">
