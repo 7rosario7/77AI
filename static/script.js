@@ -10,27 +10,28 @@ async function init() {
   document.getElementById("signup-btn").onclick   = signup;
   document.getElementById("logout-btn").onclick   = logout;
   // Session/chat actions
-  document.getElementById("new-chat").onclick     = createNewSession;
+  document.getElementById("new-chat").onclick       = createNewSession;
   document.getElementById("session-select").onchange = e=>loadMessages(e.target.value);
-  document.getElementById("rename-btn").onclick   = renameSession;
-  document.getElementById("delete-btn").onclick   = deleteCurrentSession;
-  document.getElementById("clear-btn").onclick    = ()=>clearChat(currentSession);
-  document.getElementById("send-btn").onclick     = sendPrompt;
+  document.getElementById("rename-btn").onclick     = renameSession;
+  document.getElementById("delete-btn").onclick     = deleteCurrentSession;
+  document.getElementById("clear-btn").onclick      = ()=>clearChat(currentSession);
+  document.getElementById("send-btn").onclick       = sendPrompt;
 
   // Placeholder + Enter to send
   const input = document.getElementById("prompt");
+  input.placeholder = "Speak your truth into the void...";
   input.addEventListener("focus", ()=>{
-    if (input.placeholder==="Speak your truth into the void...")
-      input.placeholder="";
+    if (input.placeholder === "Speak your truth into the void...")
+      input.placeholder = "";
   });
   input.addEventListener("keydown", e => {
-    if (e.key==="Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendPrompt();
     }
   });
 
-  // Kick off
+  // Start
   await fetchMe();
 }
 
@@ -110,11 +111,12 @@ async function renameSession() {
   const title = prompt("New name:");
   if (!title) return;
   await fetch(`/sessions/${currentSession}`, {
-    method:"PUT", headers:{"Content-Type":"application/json"},
+    method:"PATCH",             // ← use PATCH
+    headers:{"Content-Type":"application/json"},
     body: JSON.stringify({title})
   });
   await loadSessions();
-  selectOption(currentSession);
+  selectOption(currentSession); // ← re-select to show new label
 }
 
 async function deleteCurrentSession() {
@@ -137,7 +139,6 @@ async function loadMessages(sessionId) {
     box.appendChild(d);
   });
   box.scrollTop = box.scrollHeight;
-  // show rename / delete / clear
   ["rename-btn","delete-btn","clear-btn"].forEach(id=>el(id).style.display="inline-block");
 }
 
