@@ -39,7 +39,7 @@ class LoginRequest(BaseModel):
     password: str
 
 class NewSessionRequest(BaseModel):
-    title: str
+    title: str | None = None
 
 class ReflectRequest(BaseModel):
     session_id: str
@@ -49,12 +49,14 @@ class ReflectRequest(BaseModel):
 def create_access_token(data: dict) -> str:
     return jwt.encode(data, JWT_SECRET, algorithm=ALGORITHM)
 
-async def get_current_user(token: str = Cookie(None)):
-    if not token:
+async def get_current_user(
+    access_token: str = Cookie(None, alias="access_token")
+):
+    if not access_token:
         raise HTTPException(401, "Not authenticated")
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
-        return {"id": payload["user_id"]}
+        payload = jwt.decode(access_token, JWT_SECRET, algorithms=[ALGORITHM])
+        return {"id": int(payload["user_id"])}
     except JWTError:
         raise HTTPException(401, "Invalid token")
 
@@ -116,6 +118,7 @@ async def login(req: LoginRequest):
         raise HTTPException(401, "Invalid credentials")
     token = create_access_token({"user_id": str(row["id"])})
     resp = JSONResponse({"message": "OK"})
+    # set the same cookie name that get_current_user expects
     resp.set_cookie("access_token", token, httponly=True, samesite="lax")
     return resp
 
@@ -141,22 +144,24 @@ async def list_sessions(user=Depends(get_current_user)):
 @app.post("/sessions", status_code=201)
 async def create_session(req: NewSessionRequest, user=Depends(get_current_user)):
     sid = str(uuid.uuid4())
+    title = req.title or "New Chat"
     await app.state.db.execute(
         "INSERT INTO sessions (session_id,user_id,title) VALUES($1,$2,$3)",
-        sid, user["id"], req.title or "New Chat"
+        sid, user["id"], title
     )
-    return {"id": sid, "title": req.title or "New Chat"}
+    return {"id": sid, "title": title}
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, user=Depends(get_current_user)):
-    await app.state.db.execute(
-        "DELETE FROM sessions WHERE session_id=$1 AND user_id=$2",
-        session_id, user["id"]
-    )
-    await app.state.db.execute(
-        "DELETE FROM messages WHERE session_id=$1 AND user_id=$2",
-        session_id, user["id"]
-    )
+    async with app.state.db.acquire() as conn:
+        await conn.execute(
+          "DELETE FROM messages WHERE session_id=$1 AND user_id=$2",
+          session_id, user["id"]
+        )
+        await conn.execute(
+          "DELETE FROM sessions WHERE session_id=$1 AND user_id=$2",
+          session_id, user["id"]
+        )
     return {"ok": True}
 
 @app.delete("/sessions/{session_id}/messages")
@@ -190,7 +195,7 @@ async def reflect_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
 async def root():
     return HTMLResponse(open("index.html", encoding="utf-8").read())
 
-# === LAUNCHER ===
+# === RUNNER ===
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
