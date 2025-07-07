@@ -1,4 +1,6 @@
-import os, uuid, asyncpg
+import os
+import uuid
+import asyncpg
 from fastapi import FastAPI, HTTPException, Depends, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -6,21 +8,27 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from chat import reflect  # your OpenAI wrapper
+from chat import reflect, SYSTEM_PROMPT  # ← import the system prompt
 
+# === CONFIG ===
 DATABASE_URL = os.getenv("DATABASE_URL")
 JWT_SECRET    = os.getenv("JWT_SECRET")
 ALGORITHM     = "HS256"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# === APP SETUP ===
 app = FastAPI()
-app.add_middleware(CORSMiddleware,
-  allow_origins=["*"], allow_credentials=True,
-  allow_methods=["*"], allow_headers=["*"],
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# === SCHEMAS ===
 class SignupRequest(BaseModel):
     username: str
     password: str
@@ -32,10 +40,11 @@ class LoginRequest(BaseModel):
 class NewSessionRequest(BaseModel):
     title: str | None = None
 
-class ReflectRequest(BaseModel):
+class ChatRequest(BaseModel):
     session_id: str
     prompt: str
 
+# === HELPERS ===
 def create_access_token(data: dict) -> str:
     return jwt.encode(data, JWT_SECRET, algorithm=ALGORITHM)
 
@@ -48,9 +57,11 @@ async def get_current_user(access_token: str = Cookie(None, alias="access_token"
     except JWTError:
         raise HTTPException(401, "Invalid token")
 
+# === LIFESPAN ===
 @app.on_event("startup")
 async def startup():
     app.state.db = await asyncpg.create_pool(DATABASE_URL)
+    # auto-create tables
     ddl = """
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -80,15 +91,16 @@ async def startup():
 async def shutdown():
     await app.state.db.close()
 
+# === AUTH ===
 @app.post("/signup", status_code=201)
 async def signup(req: SignupRequest):
-    h = pwd_context.hash(req.password)
+    hashed = pwd_context.hash(req.password)
     async with app.state.db.acquire() as conn:
         if await conn.fetchval("SELECT 1 FROM users WHERE username=$1", req.username):
-            raise HTTPException(400, "Username taken")
+            raise HTTPException(400, "Username already taken")
         await conn.execute(
-            "INSERT INTO users(username,password_hash) VALUES($1,$2)",
-            req.username, h
+            "INSERT INTO users (username,password_hash) VALUES($1,$2)",
+            req.username, hashed
         )
     return {"message": "OK"}
 
@@ -116,6 +128,7 @@ async def logout():
 async def me(user=Depends(get_current_user)):
     return {"id": user["id"]}
 
+# === SESSIONS ===
 @app.get("/sessions")
 async def list_sessions(user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
@@ -129,7 +142,7 @@ async def create_session(req: NewSessionRequest, user=Depends(get_current_user))
     sid = str(uuid.uuid4())
     title = req.title or "New Chat"
     await app.state.db.execute(
-        "INSERT INTO sessions(session_id,user_id,title) VALUES($1,$2,$3)",
+        "INSERT INTO sessions (session_id,user_id,title) VALUES($1,$2,$3)",
         sid, user["id"], title
     )
     return {"id": sid, "title": title}
@@ -155,6 +168,21 @@ async def clear_session(session_id: str, user=Depends(get_current_user)):
     )
     return {"ok": True}
 
+# === CHAT ===
+# alias to match frontend’s /chat calls
+@app.post("/chat")
+async def chat(req: ChatRequest, user=Depends(get_current_user)):
+    # pass along the system prompt first
+    messages = await reflect(app.state.db, SYSTEM_PROMPT, user["id"], req.session_id, initial=True)
+    # then user’s prompt
+    msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
+    return {"messages": messages + msgs}
+
+# backwards‐compat reflect endpoint
+@app.post("/reflect")
+async def reflect_endpoint(req: ChatRequest, user=Depends(get_current_user)):
+    return await chat(req, user)
+
 @app.get("/messages")
 async def get_messages(session_id: str, user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
@@ -163,19 +191,12 @@ async def get_messages(session_id: str, user=Depends(get_current_user)):
     )
     return [{"role": r["role"], "content": r["content"]} for r in rows]
 
-@app.post("/reflect")
-async def reflect_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
-    msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
-    await app.state.db.execute(
-        "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
-        req.session_id, user["id"]
-    )
-    return {"messages": msgs}
-
+# === UI ===
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return HTMLResponse(open("index.html", encoding="utf-8").read())
 
+# === RUNNER ===
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
