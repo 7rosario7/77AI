@@ -1,7 +1,7 @@
 import os
 import uuid
 import asyncpg
-from fastapi import FastAPI, HTTPException, Depends, Cookie
+from fastapi import FastAPI, HTTPException, Depends, Cookie, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -9,12 +9,12 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
-from chat import reflect  # your OpenAI wrapper (gpt-3.5-turbo)
+from chat import reflect  # your OpenAI wrapper
 
 # === CONFIG ===
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
-JWT_SECRET    = os.getenv("JWT_SECRET", "your-very-secret-key")
-ALGORITHM     = "HS256"
+JWT_SECRET = os.getenv("JWT_SECRET", "your-very-secret-key")
+ALGORITHM = "HS256"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -41,7 +41,7 @@ class LoginRequest(BaseModel):
 class NewSessionRequest(BaseModel):
     title: str | None = None
 
-class ChatRequest(BaseModel):
+class ReflectRequest(BaseModel):
     session_id: str
     prompt: str
 
@@ -49,9 +49,7 @@ class ChatRequest(BaseModel):
 def create_access_token(data: dict) -> str:
     return jwt.encode(data, JWT_SECRET, algorithm=ALGORITHM)
 
-async def get_current_user(
-    access_token: str = Cookie(None, alias="access_token")
-):
+async def get_current_user(access_token: str = Cookie(None, alias="access_token")):
     if not access_token:
         raise HTTPException(401, "Not authenticated")
     try:
@@ -64,7 +62,6 @@ async def get_current_user(
 @app.on_event("startup")
 async def startup():
     app.state.db = await asyncpg.create_pool(DATABASE_URL)
-    # auto-create tables
     ddl = """
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -131,24 +128,24 @@ async def logout():
 async def me(user=Depends(get_current_user)):
     return {"id": user["id"]}
 
-# === SESSIONS & MESSAGES ===
+# === CHAT SESSIONS ===
 @app.get("/sessions")
 async def list_sessions(user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
-        "SELECT session_id,title FROM sessions WHERE user_id=$1 ORDER BY updated_at DESC",
+        "SELECT session_id, title FROM sessions WHERE user_id=$1 ORDER BY updated_at DESC",
         user["id"]
     )
-    return [{"id": r["session_id"], "title": r["title"]} for r in rows]
+    return [{"id": str(r["session_id"]), "title": r["title"]} for r in rows]
 
 @app.post("/sessions", status_code=201)
 async def create_session(req: NewSessionRequest, user=Depends(get_current_user)):
-    sid = str(uuid.uuid4())
+    sid = uuid.uuid4()
     title = req.title or "New Chat"
     await app.state.db.execute(
         "INSERT INTO sessions (session_id,user_id,title) VALUES($1,$2,$3)",
-        sid, user["id"], title
+        str(sid), user["id"], title
     )
-    return {"id": sid, "title": title}
+    return {"id": str(sid), "title": title}
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, user=Depends(get_current_user)):
@@ -171,18 +168,18 @@ async def clear_session(session_id: str, user=Depends(get_current_user)):
     )
     return {"ok": True}
 
+# === MESSAGES ===
 @app.get("/messages")
 async def get_messages(session_id: str, user=Depends(get_current_user)):
     rows = await app.state.db.fetch(
-        "SELECT role,content FROM messages WHERE session_id=$1 AND user_id=$2 ORDER BY created_at",
+        "SELECT role, content FROM messages WHERE session_id=$1 AND user_id=$2 ORDER BY created_at",
         session_id, user["id"]
     )
     return [{"role": r["role"], "content": r["content"]} for r in rows]
 
-# === CHAT ENDPOINT ===
 @app.post("/chat")
-async def chat_endpoint(req: ChatRequest, user=Depends(get_current_user)):
-    # reflect will append user + assistant messages into DB and return full list
+async def chat_endpoint(req: ReflectRequest, user=Depends(get_current_user)):
+    # call into your OpenAI wrapper, store both user & assistant messages
     msgs = await reflect(app.state.db, req.prompt, user["id"], req.session_id)
     await app.state.db.execute(
         "UPDATE sessions SET updated_at=now() WHERE session_id=$1 AND user_id=$2",
@@ -192,10 +189,9 @@ async def chat_endpoint(req: ChatRequest, user=Depends(get_current_user)):
 
 # === UI ===
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def root(request: Request):
     return HTMLResponse(open("index.html", encoding="utf-8").read())
 
-# === RUNNER ===
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))

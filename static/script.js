@@ -1,161 +1,144 @@
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener('DOMContentLoaded', init);
 
-const authView     = document.getElementById("auth-view");
-const chatView     = document.getElementById("chat-view");
-const chatNav      = document.getElementById("chat-nav");
-const newChatBtn   = document.getElementById("new-chat-btn");
-const clearBtn     = document.getElementById("clear-btn");
-const logoutBtn    = document.getElementById("logout-btn");
-
-const authBox      = document.getElementById("auth-box");
-const authTitle    = document.getElementById("auth-title");
-const authForm     = document.getElementById("auth-form");
-const toggleLink   = document.getElementById("toggle-link");
-
-const sessionsList = document.getElementById("sessions-list");
-const chatWindow   = document.getElementById("chat-window");
-const userInput    = document.getElementById("user-input");
-const sendBtn      = document.getElementById("send-btn");
-
-let isLogin = true;
 let currentSession = null;
 
 async function init() {
-  authForm.addEventListener("submit", onAuthSubmit);
-  toggleLink.addEventListener("click", toggleAuthMode);
-  newChatBtn.addEventListener("click", startNewChat);
-  clearBtn.addEventListener("click", clearCurrentChat);
-  logoutBtn.addEventListener("click", doLogout);
-  sendBtn.addEventListener("click", sendMessage);
+  // DOM refs
+  const loginTop = document.getElementById('login-top');
+  const signupTop = document.getElementById('signup-top');
+  const newChatBtn = document.getElementById('new-chat-btn');
+  const clearBtn = document.getElementById('clear-btn');
+  const logoutBtn = document.getElementById('logout-btn');
+  const authButtons = document.getElementById('auth-buttons');
+  const sessionControls = document.getElementById('session-controls');
+  const chatContainer = document.getElementById('chat-container');
+  const authContainer = document.getElementById('auth-container');
+  const loginBox = document.getElementById('login-box');
+  const signupBox = document.getElementById('signup-box');
+  const showSignup = document.getElementById('show-signup');
+  const showLogin = document.getElementById('show-login');
+  const loginForm = document.getElementById('login-form');
+  const signupForm = document.getElementById('signup-form');
+  const messageForm = document.getElementById('message-form');
+  const messageInput = document.getElementById('message-input');
 
-  await checkAuth();
-}
+  // click handlers
+  loginTop.onclick = () => showForm('login');
+  signupTop.onclick = () => showForm('signup');
+  showSignup.onclick = e => { e.preventDefault(); showForm('signup'); };
+  showLogin.onclick = e => { e.preventDefault(); showForm('login'); };
+  newChatBtn.onclick = () => startNewSession();
+  clearBtn.onclick = () => clearCurrentSession();
+  logoutBtn.onclick = () => logout();
 
-async function checkAuth() {
-  const resp = await fetch("/me", { credentials: "include" });
-  if (resp.status === 200) {
-    showChat();
-    await loadSessions();
-  } else {
-    showAuth();
-  }
-}
-
-function showAuth() {
-  authView.style.display = "flex";
-  chatView.style.display = "none";
-  chatNav.style.display = "none";
-}
-
-function showChat() {
-  authView.style.display = "none";
-  chatView.style.display = "flex";
-  chatNav.style.display = "flex";
-}
-
-function toggleAuthMode(e) {
-  e.preventDefault();
-  isLogin = !isLogin;
-  authTitle.textContent = isLogin ? "Log In" : "Sign Up";
-  authForm.querySelector("button").textContent = isLogin ? "Log In" : "Sign Up";
-  toggleLink.textContent = isLogin ? "Sign Up" : "Log In";
-}
-
-async function onAuthSubmit(e) {
-  e.preventDefault();
-  const url   = isLogin ? "/login" : "/signup";
-  const body  = {
-    username: authForm.username.value,
-    password: authForm.password.value
+  loginForm.onsubmit = async e => {
+    e.preventDefault();
+    await auth('/login', {
+      username: document.getElementById('login-user').value,
+      password: document.getElementById('login-pass').value
+    });
   };
-  const resp = await fetch(url, {
-    method: "POST",
-    credentials: "include",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(body)
-  });
-  if (resp.ok) {
-    await checkAuth();
+  signupForm.onsubmit = async e => {
+    e.preventDefault();
+    await auth('/signup', {
+      username: document.getElementById('signup-user').value,
+      password: document.getElementById('signup-pass').value
+    });
+  };
+  messageForm.onsubmit = async e => {
+    e.preventDefault();
+    const prompt = messageInput.value.trim();
+    if (!prompt || !currentSession) return;
+    appendMessage('user', prompt);
+    messageInput.value = '';
+    try {
+      const resp = await fetch('/chat', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: currentSession, prompt })
+      });
+      const data = await resp.json();
+      data.messages.forEach(m => appendMessage(m.role, m.content));
+    } catch {
+      appendMessage('assistant', 'Error sending message');
+    }
+  };
+
+  // initial check
+  const me = await fetch('/me', { credentials: 'include' });
+  if (me.status === 200) {
+    afterAuth();
   } else {
-    alert((await resp.json()).detail || "Error");
+    showForm('login');
   }
-}
 
-async function doLogout() {
-  await fetch("/logout", { method:"POST", credentials:"include" });
-  currentSession = null;
-  chatWindow.innerHTML = "";
-  showAuth();
-}
-
-async function loadSessions() {
-  const rows = await fetch("/sessions", { credentials:"include" }).then(r=>r.json());
-  sessionsList.innerHTML = "";
-  rows.forEach(s => {
-    const btn = document.createElement("button");
-    btn.textContent = s.title;
-    btn.onclick = () => loadChat(s.id);
-    sessionsList.appendChild(btn);
-  });
-  // auto-start first
-  if (rows[0]) loadChat(rows[0].id);
-}
-
-async function startNewChat() {
-  const { id } = await fetch("/sessions", {
-    method:"POST",
-    credentials:"include",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({})
-  }).then(r=>r.json());
-  currentSession = id;
-  chatWindow.innerHTML = "<p>New chat started.</p>";
-  await loadSessions();
-}
-
-async function loadChat(sessionId) {
-  currentSession = sessionId;
-  const msgs = await fetch(`/messages?session_id=${sessionId}`, { credentials:"include" })
-                  .then(r=>r.json());
-  chatWindow.innerHTML = "";
-  msgs.forEach(m => {
-    const p = document.createElement("p");
-    p.textContent = (m.role === "user" ? "You: " : "AI: ") + m.content;
-    chatWindow.appendChild(p);
-  });
-}
-
-async function clearCurrentChat() {
-  if (!currentSession) return;
-  await fetch(`/sessions/${currentSession}/messages`, {
-    method:"DELETE",
-    credentials:"include"
-  });
-  chatWindow.innerHTML = "";
-}
-
-async function sendMessage() {
-  if (!currentSession) return;
-  const prompt = userInput.value.trim();
-  if (!prompt) return;
-  const res = await fetch("/chat", {
-    method:"POST",
-    credentials:"include",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ session_id: currentSession, prompt })
-  });
-  if (!res.ok) {
-    chatWindow.insertAdjacentHTML("beforeend", "<p><em>Error sending message</em></p>");
-    return;
+  // --- helper fns ---
+  function showForm(which) {
+    loginBox.classList.toggle('hidden', which !== 'login');
+    signupBox.classList.toggle('hidden', which !== 'signup');
+    chatContainer.classList.add('hidden');
+    sessionControls.classList.add('hidden');
+    newChatBtn.classList.add('hidden');
+    authButtons.classList.remove('hidden');
+    authContainer.classList.remove('hidden');
   }
-  const { messages } = await res.json();
-  // re-render entire history
-  chatWindow.innerHTML = "";
-  messages.forEach(m => {
-    const p = document.createElement("p");
-    p.textContent = (m.role==="user"?"You: ":"AI: ") + m.content;
-    chatWindow.appendChild(p);
-  });
-  userInput.value = "";
-  chatWindow.scrollTop = chatWindow.scrollHeight;
+
+  async function auth(url, body) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (resp.ok) {
+      afterAuth();
+    } else {
+      alert('Auth failed');
+    }
+  }
+
+  async function afterAuth() {
+    authButtons.classList.add('hidden');
+    authContainer.classList.add('hidden');
+    sessionControls.classList.remove('hidden');
+    newChatBtn.classList.remove('hidden');
+    chatContainer.classList.remove('hidden');
+    await startNewSession();
+  }
+
+  async function logout() {
+    await fetch('/logout', { method: 'POST', credentials: 'include' });
+    window.location.reload();
+  }
+
+  async function startNewSession() {
+    const resp = await fetch('/sessions', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const sess = await resp.json();
+    currentSession = sess.id;
+    document.getElementById('chat-window').innerHTML = '<p class="message assistant">New chat started.</p>';
+  }
+
+  async function clearCurrentSession() {
+    if (!currentSession) return;
+    await fetch(`/sessions/${currentSession}/messages`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    document.getElementById('chat-window').innerHTML = '';
+  }
+
+  function appendMessage(role, text) {
+    const win = document.getElementById('chat-window');
+    const p = document.createElement('p');
+    p.className = `message ${role}`;
+    p.textContent = (role === 'user' ? 'You: ' : '') + text;
+    win.appendChild(p);
+    win.scrollTop = win.scrollHeight;
+  }
 }

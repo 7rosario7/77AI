@@ -2,45 +2,50 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>77 AI Chat</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header>
-    <button id="new-chat-btn">+ New Chat</button>
+    <button id="new-chat-btn" class="hidden">+ New Chat</button>
     <h1>77 AI Chat</h1>
-    <nav id="chat-nav">
+    <div id="auth-buttons">
+      <button id="login-top">Log In</button>
+      <button id="signup-top">Sign Up</button>
+    </div>
+    <div id="session-controls" class="hidden">
       <button id="clear-btn">Clear</button>
       <button id="logout-btn">Log Out</button>
-    </nav>
+    </div>
   </header>
 
-  <!-- AUTH VIEW -->
-  <main id="auth-view">
-    <div id="auth-box">
-      <h2 id="auth-title">Log In</h2>
-      <form id="auth-form">
-        <input id="user-field"    name="username" placeholder="Username" required />
-        <input id="pass-field"    type="password" name="password" placeholder="Password" required />
-        <button id="auth-submit"  type="submit">Log In</button>
-      </form>
-      <p id="toggle-text">
-        Don't have an account? <a href="#" id="toggle-link">Sign Up</a>
-      </p>
-    </div>
-  </main>
-
-  <!-- CHAT VIEW -->
-  <main id="chat-view">
-    <section id="sessions-panel">
-      <ul id="sessions-list"></ul>
-    </section>
-    <section id="chat-panel">
+  <main>
+    <section id="chat-container" class="hidden">
       <div id="chat-window"></div>
-      <div id="input-container">
-        <input id="user-input" placeholder="Type your message…" />
-        <button id="send-btn">Send</button>
+      <form id="message-form">
+        <input id="message-input" placeholder="Type your message…" autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </section>
+
+    <section id="auth-container">
+      <div id="login-box" class="auth-box hidden">
+        <h2>Log In</h2>
+        <form id="login-form">
+          <input id="login-user" placeholder="Username" required />
+          <input id="login-pass" type="password" placeholder="Password" required />
+          <button type="submit" class="big-btn">Log In</button>
+        </form>
+        <p>Don't have an account? <a href="#" id="show-signup">Sign Up</a></p>
+      </div>
+      <div id="signup-box" class="auth-box hidden">
+        <h2>Sign Up</h2>
+        <form id="signup-form">
+          <input id="signup-user" placeholder="Username" required />
+          <input id="signup-pass" type="password" placeholder="Password" required />
+          <button type="submit" class="big-btn">Sign Up</button>
+        </form>
+        <p>Already have an account? <a href="#" id="show-login">Log In</a></p>
       </div>
     </section>
   </main>
